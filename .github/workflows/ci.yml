@@ -5,11 +5,6 @@ on:
   push:
     branches: [main]
 
-env:
-  DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
-  DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-  DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-
 jobs:
   test:
     name: unit tests
@@ -21,25 +16,3 @@ jobs:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
       - run: pytest tests/unit -v
-
-  validate:
-    name: validate bundle
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: databricks/setup-cli@main
-      - run: databricks bundle validate -t dev
-
-  deploy:
-    name: deploy to prod
-    needs: [test, validate]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    # Requires a reviewer to approve the deploy if you configure the
-    # environment with protection rules in GitHub settings.
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-      - uses: databricks/setup-cli@main
-      - run: databricks bundle deploy -t prod
-      - run: databricks bundle summary -t prod
