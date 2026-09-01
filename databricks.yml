@@ -34,7 +34,7 @@ targets:
     variables:
       catalog: avanti_dev
     workspace:
-      host: https://adb-7405605400638138.18.azuredatabricks.net   # <-- paste your workspace URL here
+      host: https://adb-7405605400638138.18.azuredatabricks.net
 
   # Avanti production. Filled in once their workspace exists.
   prod:
