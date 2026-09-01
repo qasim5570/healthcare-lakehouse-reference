@@ -1,0 +1,80 @@
+resources:
+  jobs:
+    # ---------------------------------------------------------------------
+    # 1. Extract: pull from the source API, land raw JSON in the volume.
+    #    Runs in Phase 1 against real Nookal credentials; until then it uses
+    #    the built-in sample generator so the whole chain is runnable today.
+    # ---------------------------------------------------------------------
+    ingest_nookal:
+      name: ${var.catalog}_ingest_nookal
+      max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 0 5 * * ?"
+        timezone_id: Australia/Sydney
+        pause_status: PAUSED
+      tasks:
+        - task_key: extract
+          notebook_task:
+            notebook_path: ../src/jobs/ingest_nookal.py
+            base_parameters:
+              catalog: ${var.catalog}
+              landing_schema: ${var.landing_schema}
+              source: nookal
+              entity: appointments
+              mode: sample
+          environment_key: Default
+
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "5"
+            dependencies:
+              - ../dist/*.whl
+
+    # ---------------------------------------------------------------------
+    # 2. Transform: landing volume -> bronze -> silver.
+    #    Sequential tasks so a failure upstream stops the layers below it.
+    # ---------------------------------------------------------------------
+    medallion_build:
+      name: ${var.catalog}_medallion_build
+      tasks:
+        - task_key: bronze
+          notebook_task:
+            notebook_path: ../src/jobs/bronze_load.py
+            base_parameters:
+              catalog: ${var.catalog}
+              landing_schema: ${var.landing_schema}
+              bronze_schema: ${var.bronze_schema}
+              ops_schema: ${var.ops_schema}
+              source: nookal
+              entity: appointments
+          environment_key: Default
+        - task_key: silver
+          depends_on:
+            - task_key: bronze
+          notebook_task:
+            notebook_path: ../src/jobs/silver_build.py
+            base_parameters:
+              catalog: ${var.catalog}
+              bronze_schema: ${var.bronze_schema}
+              silver_schema: silver
+          environment_key: Default
+        - task_key: quality_gate
+          depends_on:
+            - task_key: silver
+          notebook_task:
+            notebook_path: ../src/jobs/quality_gate.py
+            base_parameters:
+              catalog: ${var.catalog}
+              silver_schema: silver
+          environment_key: Default
+      queue:
+        enabled: true
+      environments:
+        - environment_key: Default
+          spec:
+            dependencies:
+              - ../dist/*.whl
+            environment_version: "5"
+      performance_target: STANDARD
+

@@ -1,0 +1,51 @@
+bundle:
+  name: avanti-command-centre
+
+include:
+  - resources/*.yml
+
+artifacts:
+  python_artifact:
+    type: whl
+    build: uv build --wheel
+
+variables:
+  catalog:
+    description: Unity Catalog catalog that this target writes to.
+  landing_schema:
+    description: Schema that owns the landing volume.
+    default: landing
+  bronze_schema:
+    default: bronze
+  silver_schema:
+    default: silver
+  ops_schema:
+    default: ops
+  notification_email:
+    description: Address that receives job failure alerts.
+    default: ""
+
+targets:
+  # Your personal workspace. Everything is prefixed [dev <you>] and schedules
+  # are paused, so nothing fires on a timer while you are experimenting.
+  dev:
+    mode: development
+    default: true
+    variables:
+      catalog: avanti_dev
+    workspace:
+      host: https://adb-7405605400638138.18.azuredatabricks.net   # <-- paste your workspace URL here
+
+  # Avanti production. Filled in once their workspace exists.
+  prod:
+    mode: production
+    variables:
+      catalog: avanti_prod
+    workspace:
+      host: https://CHANGE-ME-PROD.azuredatabricks.net
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: sp-avanti-prod
+    permissions:
+      - level: CAN_MANAGE
+        group_name: avanti_engineers

@@ -1,0 +1,17 @@
+[project]
+name = "avanti-command-centre"
+version = "0.1.0"
+description = "Avanti Health data platform on Databricks"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["avanti*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
