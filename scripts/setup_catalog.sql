@@ -1,14 +1,36 @@
--- One-time setup. Run this in a SQL editor or notebook BEFORE the first
--- bundle deploy. Replace ${catalog} with your target catalog.
+-- ===========================================================================
+-- One-time environment setup. Run BEFORE the first bundle deploy.
 --
--- On a personal workspace the default catalog is usually `workspace`, so you
--- can run this as-is with :catalog = workspace. For Avanti it becomes
--- avanti_dev / avanti_test / avanti_prod, created once each.
+-- HOW TO RUN
+--   ${catalog} is a placeholder, NOT Databricks SQL syntax. Either:
+--     a) find-and-replace ${catalog} with your catalog name, or
+--     b) run it from a notebook:
+--
+--          CATALOG = "avanti_dev"
+--          sql = open("/Workspace/.../setup_catalog.sql").read()
+--          for stmt in sql.split(";"):
+--              if stmt.strip() and not stmt.strip().startswith("--"):
+--                  spark.sql(stmt.replace("${catalog}", CATALOG))
+--
+--   Run once per environment: avanti_dev, avanti_test, avanti_prod.
+--
+-- PREREQUISITE
+--   The catalog itself must exist first, bound to YOUR storage:
+--
+--     CREATE CATALOG IF NOT EXISTS avanti_dev
+--     MANAGED LOCATION 'abfss://lakehouse@<account>.dfs.core.windows.net/';
+--
+--   Without MANAGED LOCATION the catalog silently falls back to the
+--   metastore default, which is Databricks-managed storage.
+-- ===========================================================================
+
 
 -- ---------------------------------------------------------------------------
--- Schemas. These are namespaces, not storage: creating one allocates nothing.
--- What they give you is a grant boundary, which is why analysts can be given
--- gold without ever seeing bronze.
+-- SCHEMAS
+--
+-- Namespaces, not storage: creating one allocates nothing. What they give you
+-- is a GRANT BOUNDARY, which is why analysts can be given gold without ever
+-- seeing bronze — unconformed data produces confidently wrong answers.
 -- ---------------------------------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS ${catalog}.landing
   COMMENT 'Raw files as landed from source APIs. Volumes only, no tables.';
@@ -22,55 +44,156 @@ CREATE SCHEMA IF NOT EXISTS ${catalog}.silver
 CREATE SCHEMA IF NOT EXISTS ${catalog}.gold
   COMMENT 'Business-facing marts and metric views. The only layer analysts query.';
 
+CREATE SCHEMA IF NOT EXISTS ${catalog}.gold_secure
+  COMMENT 'PHI-bearing views. Restricted grants, deliberately separate from gold.';
+
 CREATE SCHEMA IF NOT EXISTS ${catalog}.ops
-  COMMENT 'Watermarks, ingest audit, data quality results, reconciliation.';
+  COMMENT 'Watermarks, ingest audit, data quality results, reconciliation, checkpoints.';
+
+CREATE SCHEMA IF NOT EXISTS ${catalog}.ml
+  COMMENT 'Feature tables, registered models, batch inference outputs.';
+
 
 -- ---------------------------------------------------------------------------
--- Landing volume. This is the only place raw files live. The /Volumes path is
--- Unity Catalog's governed alias for a folder in your cloud bucket.
+-- VOLUMES — governed folders for FILES, as opposed to tables.
+--
+-- /Volumes/<catalog>/<schema>/<volume>/ then ordinary subdirectories.
+-- Unity Catalog resolves that path to your cloud bucket and brokers a
+-- short-lived, path-scoped credential per access. Nobody handles a storage key.
 -- ---------------------------------------------------------------------------
 CREATE VOLUME IF NOT EXISTS ${catalog}.landing.raw
-  COMMENT 'Raw API responses. Lifecycle: 90 days hot, then archive.';
+  COMMENT 'Raw API responses, exactly as returned. The replay tape. Lifecycle: 90 days hot, then archive, then delete per retention policy.';
+
+-- CRITICAL: checkpoints live in ops, NOT in landing.
+--
+-- The landing volume gets a lifecycle rule that deletes files after 90 days.
+-- If Auto Loader checkpoints sat inside it, that rule would eventually delete
+-- them — Auto Loader would forget which files it had consumed and REPROCESS
+-- THE ENTIRE LANDING VOLUME, duplicating all of Bronze. You would discover it
+-- months later as a mysterious doubling of row counts.
+CREATE VOLUME IF NOT EXISTS ${catalog}.ops.checkpoints
+  COMMENT 'Auto Loader checkpoints (RocksDB file tracking + inferred schemas). Operational state. NEVER subject to a lifecycle rule.';
+
 
 -- ---------------------------------------------------------------------------
--- Ops tables.
+-- OPS TABLES
+--
+-- Operational metadata about the pipeline itself, not business data.
+-- Separate schema because: different grants, different lifecycle (append-only
+-- audit vs rebuildable business tables), and a Bronze full refresh must never
+-- take the audit trail with it.
 -- ---------------------------------------------------------------------------
+
+-- Where incremental extraction got to, per source and entity.
+-- Read at the start of a run, minus an overlap window. Committed ONLY after a
+-- fully successful pull — committing on partial success creates a permanent
+-- gap that reports as a successful run.
 CREATE TABLE IF NOT EXISTS ${catalog}.ops.watermark (
-  source              STRING  NOT NULL,
-  entity              STRING  NOT NULL,
-  high_water_mark     TIMESTAMP,
-  last_batch_id       STRING,
+  source              STRING  NOT NULL  COMMENT 'nookal | xero | hapana | alayacare | ghl',
+  entity              STRING  NOT NULL  COMMENT 'appointments | patients | journals | ...',
+  high_water_mark     TIMESTAMP         COMMENT 'Max source modification timestamp successfully extracted',
+  last_batch_id       STRING            COMMENT 'The job run that last advanced this',
   updated_at          TIMESTAMP
-) COMMENT 'Incremental extraction position. Committed only after a successful full pull.';
+) COMMENT 'Incremental extraction position. One row per source-entity pair.';
 
+-- One row per extraction run. Written as RUNNING before any work, closed as
+-- SUCCEEDED or FAILED afterwards. A row left RUNNING with a null finished_at
+-- means the run died mid-flight — which is exactly the state you want visible.
+--
+-- This is what you show the business when asked "is this number stale?", and
+-- what catches a job that has been succeeding while pulling zero rows.
 CREATE TABLE IF NOT EXISTS ${catalog}.ops.ingest_audit (
   source              STRING,
   entity              STRING,
-  batch_id            STRING,
+  batch_id            STRING    COMMENT 'The Databricks job run id, or manual-<uuid>',
   record_count        BIGINT,
   page_count          INT,
-  status              STRING,
+  status              STRING    COMMENT 'RUNNING | SUCCEEDED | FAILED',
   error_message       STRING,
   started_at          TIMESTAMP,
   finished_at         TIMESTAMP
-) COMMENT 'One row per extraction run. This is what you show the business when asked if a number is stale.';
+) COMMENT 'One row per extraction run. A SUCCEEDED row with record_count = 0 should make you suspicious, not relieved.';
 
+-- Quality gate output, appended every run. The value is in TRENDING these, not
+-- just alerting: a phone-normalisation failure rate creeping from 8% to 20%
+-- over a month is a real problem no single run would flag.
 CREATE TABLE IF NOT EXISTS ${catalog}.ops.dq_results (
   check_name          STRING,
-  severity            STRING,
+  severity            STRING    COMMENT 'fail (stops the pipeline) | warn (recorded only)',
   value               DOUBLE,
   threshold           DOUBLE,
   passed              BOOLEAN,
   run_ts              TIMESTAMP
-) COMMENT 'Quality gate output, appended every run. Trend these, do not just alert on them.';
+) COMMENT 'Quality gate results. Trend them, do not just alert on them.';
+
+-- Reconciliation variances. Expectations catch MALFORMED data; reconciliation
+-- catches WRONG data, which is what destroys credibility with a finance team.
+CREATE TABLE IF NOT EXISTS ${catalog}.ops.recon_results (
+  check_name          STRING    COMMENT 'gl_tie_out | appointment_count | sah_three_way | ...',
+  grain               STRING    COMMENT 'What the variance is measured at, e.g. account_code + period',
+  grain_value         STRING,
+  source_value        DOUBLE    COMMENT 'What the source system says',
+  platform_value      DOUBLE    COMMENT 'What our tables say',
+  variance            DOUBLE,
+  tolerance           DOUBLE,
+  passed              BOOLEAN,
+  run_ts              TIMESTAMP
+) COMMENT 'Cross-system reconciliation. GL tie-out tolerance is zero.';
+
 
 -- ---------------------------------------------------------------------------
--- Grants. Commented out for a personal workspace; uncomment for Avanti once
--- the groups exist. Note these grant at SCHEMA level, to GROUPS, never to
--- individuals - that is what keeps the model reviewable.
+-- VERIFY — run these after the above and check the output.
 -- ---------------------------------------------------------------------------
--- GRANT USE CATALOG ON CATALOG ${catalog} TO avanti_analysts;
--- GRANT USE SCHEMA, SELECT ON SCHEMA ${catalog}.gold TO avanti_analysts;
--- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.bronze TO avanti_engineers;
--- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.silver TO avanti_engineers;
--- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.gold   TO avanti_engineers;
+-- SHOW SCHEMAS IN ${catalog};
+--   expect: landing, bronze, silver, gold, gold_secure, ops, ml
+--
+-- SHOW VOLUMES IN ${catalog}.landing;    -- expect: raw
+-- SHOW VOLUMES IN ${catalog}.ops;        -- expect: checkpoints
+--
+-- SHOW TABLES IN ${catalog}.ops;
+--   expect: watermark, ingest_audit, dq_results, recon_results
+--
+-- DESCRIBE CATALOG EXTENDED ${catalog};
+--   confirm the storage location is YOUR abfss:// path, not a
+--   Databricks-managed default
+
+
+-- ---------------------------------------------------------------------------
+-- GRANTS — commented out for a personal sandbox where you own everything.
+-- Uncomment for Avanti once the groups exist.
+--
+-- Grant at SCHEMA level, to GROUPS, never to individuals and never
+-- table-by-table. That is what keeps the model reviewable and the quarterly
+-- access review tractable.
+--
+-- Note the deliberate asymmetry: analysts get gold ONLY. Not for secrecy —
+-- because querying Bronze directly would count cancelled appointments as
+-- completed, since Bronze holds raw source statuses before canonical_status
+-- has run.
+-- ---------------------------------------------------------------------------
+-- GRANT USE CATALOG ON CATALOG ${catalog} TO `avanti_analysts`;
+-- GRANT USE SCHEMA, SELECT ON SCHEMA ${catalog}.gold TO `avanti_analysts`;
+--
+-- GRANT USE CATALOG ON CATALOG ${catalog} TO `avanti_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.landing TO `avanti_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.bronze  TO `avanti_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.silver  TO `avanti_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.gold    TO `avanti_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.ops     TO `avanti_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.ml      TO `avanti_engineers`;
+--
+-- Identifiable detail lives here, with a much shorter grant list.
+-- GRANT USE SCHEMA, SELECT ON SCHEMA ${catalog}.gold_secure TO `avanti_clinical_leads`;
+--
+-- SERVICE PRINCIPALS — production jobs do NOT run as a human, so every
+-- privilege the pipeline relies on must be granted explicitly. Miss these and
+-- the scheduled job fails at 05:00 with a permission error.
+-- GRANT USE CATALOG ON CATALOG ${catalog} TO `sp-avanti-ingest`;
+-- GRANT USE SCHEMA, WRITE VOLUME ON SCHEMA ${catalog}.landing TO `sp-avanti-ingest`;
+-- GRANT USE SCHEMA, WRITE VOLUME, SELECT, MODIFY ON SCHEMA ${catalog}.ops TO `sp-avanti-ingest`;
+--
+-- GRANT USE CATALOG ON CATALOG ${catalog} TO `sp-avanti-prod`;
+-- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.bronze TO `sp-avanti-prod`;
+-- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.silver TO `sp-avanti-prod`;
+-- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.gold   TO `sp-avanti-prod`;
+-- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.ops    TO `sp-avanti-prod`;
