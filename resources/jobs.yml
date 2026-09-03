@@ -19,9 +19,11 @@ resources:
             base_parameters:
               catalog: ${var.catalog}
               landing_schema: ${var.landing_schema}
+              ops_schema: ${var.ops_schema}
               source: nookal
               entity: appointments
               mode: sample
+              run_id: "{{job.run_id}}"
           environment_key: Default
 
       environments:
