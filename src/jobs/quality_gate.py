@@ -8,17 +8,21 @@
 # should leave yesterday's Gold in place rather than publishing today's bad
 # numbers.
 #
-# Each check returns (name, severity, value, threshold, passed).
+# fail = the dataset is meaningless, stop the pipeline.
+# warn = record the metric, keep going. Most rules belong here.
+#
+# The value is in TRENDING these, not just alerting. A phone-normalisation
+# failure rate creeping from 8% to 20% over a month is a real problem that no
+# single run would flag.
 # ---------------------------------------------------------------------------
 
 from pyspark.sql import functions as F
+
 from avanti.params import param
 
 CATALOG = param("catalog")
 SILVER = param("silver_schema")
-
-fact = spark.table(f"{CATALOG}.{SILVER}.fct_appointment")
-total = fact.count()
+OPS = param("ops_schema")
 
 results = []
 
@@ -27,43 +31,91 @@ def check(name: str, severity: str, value: float, threshold: float, passed: bool
     results.append((name, severity, float(value), float(threshold), passed))
 
 
+def rate(numerator: int, denominator: int) -> float:
+    return numerator / denominator if denominator else 0.0
+
+
 # COMMAND ----------
 
-# FAIL checks stop the pipeline. Reserve these for violations that make the
-# dataset meaningless.
+# ---------------------------------------------------------------------------
+# fct_appointment
+# ---------------------------------------------------------------------------
+fact = spark.table(f"{CATALOG}.{SILVER}.fct_appointment")
+total = fact.count()
+
 check("row_count_non_zero", "fail", total, 1, total >= 1)
 
 null_keys = fact.filter(F.col("appointment_key").isNull()).count()
 check("no_null_surrogate_keys", "fail", null_keys, 0, null_keys == 0)
 
-dupes = (
-    fact.groupBy("appointment_key").count().filter("count > 1").count()
-)
+dupes = fact.groupBy("appointment_key").count().filter("count > 1").count()
 check("surrogate_key_unique", "fail", dupes, 0, dupes == 0)
 
-# WARN checks record a metric without stopping the run. Most rules belong here.
-unknown_status = fact.filter(F.col("status") == "unknown").count()
-unknown_rate = unknown_status / total if total else 0
-check("unknown_status_rate", "warn", unknown_rate, 0.05, unknown_rate <= 0.05)
+orphan_clinic = fact.filter(F.col("clinic_key").isNull()).count()
+check("clinic_key_present", "warn", rate(orphan_clinic, total), 0.01,
+      rate(orphan_clinic, total) <= 0.01)
 
-no_phone = fact.filter(F.col("phone_norm").isNull()).count()
-phone_null_rate = no_phone / total if total else 0
+# Nookal has no status STRING — status is derived from the cancelled / DNA /
+# arrived flags, so nothing can map to "unknown". A high 'booked' rate instead
+# means the flags are not being set as expected upstream.
+booked = fact.filter(F.col("status") == "booked").count()
+check("booked_status_rate", "warn", rate(booked, total), 0.60,
+      rate(booked, total) <= 0.60)
+
+future_dated = fact.filter(
+    F.col("start_ts") > F.current_timestamp() + F.expr("INTERVAL 365 DAYS")
+).count()
+check("no_implausible_future_dates", "warn", future_dated, 0, future_dated == 0)
+
+bad_duration = fact.filter(
+    F.col("duration_min").isNull() | (F.col("duration_min") <= 0) | (F.col("duration_min") > 480)
+).count()
+check("duration_plausible", "warn", rate(bad_duration, total), 0.05,
+      rate(bad_duration, total) <= 0.05)
+
+# COMMAND ----------
+
+# ---------------------------------------------------------------------------
+# party_candidate — identifier normalisation lives here, because
+# fct_appointment no longer carries patient detail.
+# ---------------------------------------------------------------------------
+party = spark.table(f"{CATALOG}.{SILVER}.party_candidate")
+party_total = party.count()
+
+check("party_count_non_zero", "fail", party_total, 1, party_total >= 1)
+
+no_phone = party.filter(F.col("phone_norm").isNull()).count()
 # A rising rate here degrades the identity match rate, which corrupts every
 # cross-domain metric downstream long before anyone notices a dashboard is off.
-check("phone_normalisation_rate", "warn", phone_null_rate, 0.30, phone_null_rate <= 0.30)
+check("phone_normalisation_rate", "warn", rate(no_phone, party_total), 0.30,
+      rate(no_phone, party_total) <= 0.30)
 
-future_dated = fact.filter(F.col("start_ts") > F.current_timestamp() + F.expr("INTERVAL 365 DAYS")).count()
-check("no_implausible_future_dates", "warn", future_dated, 0, future_dated == 0)
+no_email = party.filter(F.col("email_norm").isNull()).count()
+check("email_normalisation_rate", "warn", rate(no_email, party_total), 0.40,
+      rate(no_email, party_total) <= 0.40)
+
+# A party with no phone, no email and no DOB cannot be matched to any other
+# source. This rate is the hard CEILING on the eventual identity match rate —
+# worth knowing before promising any cross-domain attribution.
+unmatchable = party.filter(
+    F.col("phone_norm").isNull()
+    & F.col("email_norm").isNull()
+    & F.col("date_of_birth").isNull()
+).count()
+check("party_has_matchable_identifier", "warn", rate(unmatchable, party_total), 0.10,
+      rate(unmatchable, party_total) <= 0.10)
+
+dupe_party = party.groupBy("source", "source_party_id").count().filter("count > 1").count()
+check("party_id_unique_per_source", "fail", dupe_party, 0, dupe_party == 0)
 
 # COMMAND ----------
 
 schema = "check_name string, severity string, value double, threshold double, passed boolean"
 df = spark.createDataFrame(results, schema).withColumn("run_ts", F.current_timestamp())
 
-spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.ops")
-df.write.mode("append").saveAsTable(f"{CATALOG}.ops.dq_results")
+df.write.mode("append").saveAsTable(f"{CATALOG}.{OPS}.dq_results")
 
-display(df)
+display(df.orderBy(F.col("passed").asc(), "severity", "check_name"))
 
 failures = [r for r in results if r[4] is False and r[1] == "fail"]
 warnings = [r for r in results if r[4] is False and r[1] == "warn"]
@@ -73,6 +125,8 @@ for name, _, value, threshold, _ in warnings:
 
 if failures:
     detail = ", ".join(f"{n}={v}" for n, _, v, _, _ in failures)
-    raise AssertionError(f"Quality gate failed: {detail}")
+    raise AssertionError(f"Quality gate FAILED: {detail}")
 
-print(f"Quality gate passed. {len(warnings)} warning(s), {total} rows checked.")
+print(f"Quality gate passed. {len(warnings)} warning(s).")
+print(f"  fct_appointment:  {total} rows")
+print(f"  party_candidate:  {party_total} rows")

@@ -1,6 +1,46 @@
 resources:
   jobs:
     # ---------------------------------------------------------------------
+    # 0. Environment setup: schemas, volumes, ops tables.
+    #
+    #    Run ON DEMAND, once per environment, and again whenever
+    #    scripts/setup_catalog.sql changes. Every statement is
+    #    CREATE ... IF NOT EXISTS, so re-running is a safe no-op.
+    #
+    #    PREREQUISITE, and deliberately manual — the catalog must exist first,
+    #    bound to your own storage:
+    #
+    #      CREATE CATALOG IF NOT EXISTS avanti_dev
+    #      MANAGED LOCATION 'abfss://<container>@<account>.dfs.core.windows.net/';
+    #
+    #    That statement names the storage path, is genuinely once per
+    #    environment, and getting it wrong silently puts data on
+    #    Databricks-managed storage. Bootstrapping it from inside the job that
+    #    depends on it would be circular.
+    # ---------------------------------------------------------------------
+    setup_environment:
+      name: ${var.catalog}_setup_environment
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: setup
+          notebook_task:
+            notebook_path: ../src/jobs/setup_environment.py
+            base_parameters:
+              catalog: ${var.catalog}
+              # ${workspace.file_path} resolves at DEPLOY time to wherever the
+              # CLI uploaded the repo, so the notebook finds the SQL file
+              # without a hardcoded path.
+              sql_path: ${workspace.file_path}/scripts/setup_catalog.sql
+          environment_key: Default
+
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "5"
+            dependencies:
+              - ../dist/*.whl
+
+    # ---------------------------------------------------------------------
     # 1. Extract: pull from the source API, land raw JSON in the volume.
     #    Runs in Phase 1 against real Nookal credentials; until then it uses
     #    the built-in sample generator so the whole chain is runnable today.
@@ -9,6 +49,8 @@ resources:
       name: ${var.catalog}_ingest_nookal
       max_concurrent_runs: 1
       schedule:
+        # Quartz cron starts at SECONDS, not minutes. The UI picker generates
+        # this correctly; hand-writing it is how you end up running at 05:00:02.
         quartz_cron_expression: "0 0 5 * * ?"
         timezone_id: Australia/Sydney
         pause_status: PAUSED
@@ -23,6 +65,10 @@ resources:
               source: nookal
               entity: appointments
               mode: sample
+              # {{job.run_id}} is a Databricks dynamic value, resolved at RUN
+              # time. It makes BATCH_ID stable across task retries, so a retry
+              # overwrites its own files instead of writing a second set under
+              # a new name.
               run_id: "{{job.run_id}}"
           environment_key: Default
 
@@ -34,11 +80,12 @@ resources:
               - ../dist/*.whl
 
     # ---------------------------------------------------------------------
-    # 2. Transform: landing volume -> bronze -> silver.
+    # 2. Transform: landing volume -> bronze -> silver -> quality gate.
     #    Sequential tasks so a failure upstream stops the layers below it.
     # ---------------------------------------------------------------------
     medallion_build:
       name: ${var.catalog}_medallion_build
+      max_concurrent_runs: 1
       tasks:
         - task_key: bronze
           notebook_task:
@@ -51,6 +98,7 @@ resources:
               source: nookal
               entity: appointments
           environment_key: Default
+
         - task_key: silver
           depends_on:
             - task_key: bronze
@@ -59,8 +107,9 @@ resources:
             base_parameters:
               catalog: ${var.catalog}
               bronze_schema: ${var.bronze_schema}
-              silver_schema: silver
+              silver_schema: ${var.silver_schema}
           environment_key: Default
+
         - task_key: quality_gate
           depends_on:
             - task_key: silver
@@ -68,15 +117,19 @@ resources:
             notebook_path: ../src/jobs/quality_gate.py
             base_parameters:
               catalog: ${var.catalog}
-              silver_schema: silver
+              silver_schema: ${var.silver_schema}
+              ops_schema: ${var.ops_schema} 
           environment_key: Default
+
+      # UI defaults the API does not apply. Set explicitly, or you get
+      # "it worked when I built it in the UI".
       queue:
         enabled: true
+      performance_target: STANDARD
+
       environments:
         - environment_key: Default
           spec:
+            environment_version: "5"
             dependencies:
               - ../dist/*.whl
-            environment_version: "5"
-      performance_target: STANDARD
-

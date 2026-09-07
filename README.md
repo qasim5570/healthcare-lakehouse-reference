@@ -52,7 +52,7 @@ SELECT current_catalog();
 
 ### 3. Create the schemas and volume
 
-Open `scripts/setup_catalog.sql` in a SQL editor, replace `${catalog}` with
+Open `scripts/setup_catalog.sql` in a SQL editor, replace `avanti_dev` with
 your catalog name, and run it. This is one-time.
 
 ### 4. Validate and deploy
