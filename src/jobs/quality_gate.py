@@ -38,36 +38,36 @@ def rate(numerator: int, denominator: int) -> float:
 # COMMAND ----------
 
 # ---------------------------------------------------------------------------
-# fct_appointment
+# silver.appointment
 # ---------------------------------------------------------------------------
-fact = spark.table(f"{CATALOG}.{SILVER}.fct_appointment")
-total = fact.count()
+appt = spark.table(f"{CATALOG}.{SILVER}.appointment")
+total = appt.count()
 
 check("row_count_non_zero", "fail", total, 1, total >= 1)
 
-null_keys = fact.filter(F.col("appointment_key").isNull()).count()
+null_keys = appt.filter(F.col("appointment_key").isNull()).count()
 check("no_null_surrogate_keys", "fail", null_keys, 0, null_keys == 0)
 
-dupes = fact.groupBy("appointment_key").count().filter("count > 1").count()
+dupes = appt.groupBy("appointment_key").count().filter("count > 1").count()
 check("surrogate_key_unique", "fail", dupes, 0, dupes == 0)
 
-orphan_clinic = fact.filter(F.col("clinic_key").isNull()).count()
+orphan_clinic = appt.filter(F.col("clinic_key").isNull()).count()
 check("clinic_key_present", "warn", rate(orphan_clinic, total), 0.01,
       rate(orphan_clinic, total) <= 0.01)
 
 # Nookal has no status STRING — status is derived from the cancelled / DNA /
 # arrived flags, so nothing can map to "unknown". A high 'booked' rate instead
 # means the flags are not being set as expected upstream.
-booked = fact.filter(F.col("status") == "booked").count()
+booked = appt.filter(F.col("status") == "booked").count()
 check("booked_status_rate", "warn", rate(booked, total), 0.60,
       rate(booked, total) <= 0.60)
 
-future_dated = fact.filter(
+future_dated = appt.filter(
     F.col("start_ts") > F.current_timestamp() + F.expr("INTERVAL 365 DAYS")
 ).count()
 check("no_implausible_future_dates", "warn", future_dated, 0, future_dated == 0)
 
-bad_duration = fact.filter(
+bad_duration = appt.filter(
     F.col("duration_min").isNull() | (F.col("duration_min") <= 0) | (F.col("duration_min") > 480)
 ).count()
 check("duration_plausible", "warn", rate(bad_duration, total), 0.05,
@@ -77,7 +77,7 @@ check("duration_plausible", "warn", rate(bad_duration, total), 0.05,
 
 # ---------------------------------------------------------------------------
 # party_candidate — identifier normalisation lives here, because
-# fct_appointment no longer carries patient detail.
+# silver.appointment no longer carries patient detail.
 # ---------------------------------------------------------------------------
 party = spark.table(f"{CATALOG}.{SILVER}.party_candidate")
 party_total = party.count()
@@ -128,5 +128,5 @@ if failures:
     raise AssertionError(f"Quality gate FAILED: {detail}")
 
 print(f"Quality gate passed. {len(warnings)} warning(s).")
-print(f"  fct_appointment:  {total} rows")
+print(f"  silver.appointment:  {total} rows")
 print(f"  party_candidate:  {party_total} rows")

@@ -19,6 +19,8 @@ variables:
     default: bronze
   silver_schema:
     default: silver
+  gold_schema:
+    default: gold
   ops_schema:
     default: ops
   notification_email:

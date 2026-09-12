@@ -121,11 +121,31 @@ resources:
               ops_schema: ${var.ops_schema} 
           environment_key: Default
 
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "5"
+            dependencies:
+              - ../dist/*.whl
+
       # UI defaults the API does not apply. Set explicitly, or you get
       # "it worked when I built it in the UI".
       queue:
         enabled: true
       performance_target: STANDARD
+
+    gold_build:
+      name: ${var.catalog}.gold_build
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: gold
+          notebook_task:
+            notebook_path: ../src/jobs/gold_build.py
+            base_parameters:
+              catalog: ${var.catalog}
+              silver_schema: silver
+              gold_schema: gold
+          environment_key: Default
 
       environments:
         - environment_key: Default

@@ -6,6 +6,10 @@
 #   2. normalise identifiers into a candidate pool
 #   3. emit the fact table with deterministic surrogate keys
 #
+# NAMING: Silver tables are plain nouns — `appointment`, not `fct_appointment`.
+# Silver is CONFORMED SOURCE DATA, not a dimensional model. The fct_/dim_
+# prefixes belong in Gold, where they carry meaning.
+#
 # Column names here match Nookal's ACTUAL API response, read from the PHP SDK
 # (types/Appointments.php): ID, patientID, practitionerID, locationID,
 # appointmentDate, appointmentStartTime, DNA, cancelled, lastModified. Note the
@@ -115,7 +119,7 @@ deduped = (
 
 # COMMAND ----------
 
-fact = (
+appointment = (
     deduped
     .filter(F.col("src_appointment_id").isNotNull() & F.col("start_ts").isNotNull())
     .withColumn("appointment_key", udf_key(F.lit("nookal"), F.col("src_appointment_id")))
@@ -133,8 +137,8 @@ fact = (
           "phone_norm", "name_key", "date_of_birth", "postcode")
 )
 
-fact.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(
-    f"{CATALOG}.{SILVER}.fct_appointment"
+appointment.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(
+    f"{CATALOG}.{SILVER}.appointment"
 )
 
 # COMMAND ----------
@@ -166,5 +170,5 @@ fact.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(
     .saveAsTable(f"{CATALOG}.{SILVER}.party_candidate")
 )
 
-print(f"fct_appointment:  {spark.table(f'{CATALOG}.{SILVER}.fct_appointment').count()} rows")
+print(f"appointment:      {spark.table(f'{CATALOG}.{SILVER}.appointment').count()} rows")
 print(f"party_candidate:  {spark.table(f'{CATALOG}.{SILVER}.party_candidate').count()} rows")
