@@ -19,6 +19,8 @@ variables:
     default: bronze
   silver_schema:
     default: silver
+  gold_schema:
+    default: gold
   ops_schema:
     default: ops
   notification_email:
@@ -34,7 +36,7 @@ targets:
     variables:
       catalog: avanti_dev
     workspace:
-      host: https://adb-7405605400638138.18.azuredatabricks.net
+      host: https://adb-7405606708936184.4.azuredatabricks.net/
 
   # Avanti production. Filled in once their workspace exists.
   prod:

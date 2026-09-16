@@ -34,7 +34,7 @@ can accidentally deploy to a placeholder.
 - Schemas: `landing`, `bronze`, `silver`, `gold`, `ops`
 - Volume `avanti_dev.landing.raw`
 
-If not, run `scripts/setup_catalog.sql` first, replacing `${catalog}`.
+If not, run `scripts/setup_catalog.sql` first, replacing `avanti_dev`.
 
 ## Four commands
 

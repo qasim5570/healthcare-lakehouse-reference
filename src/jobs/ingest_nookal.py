@@ -146,6 +146,25 @@ PAGE_SIZE = 200          # [DOCS] page_length: default 100, MAXIMUM 200
 MAX_PAGES = 500          # circuit breaker: a paging bug must not loop forever
 RETRY_ATTEMPTS = 5
 
+# ---------------------------------------------------------------------------
+# SAMPLE VOLUME — mode=sample only. Ignored entirely when mode=api.
+#
+# Three pages over 120 days was enough to prove the pipeline and far too thin
+# for a dashboard: utilisation sat near 2%, every patient fell in the lowest
+# value band, and there was no prior year to compare against. These numbers
+# produce roughly 4,000 appointments across 14 months, which gives the marts
+# something with shape.
+# ---------------------------------------------------------------------------
+# 150 pages x 200 = ~30,000 appointments over 16 months. That works out at
+# roughly 15 per clinic per day across six clinics, which is a plausible
+# allied-health load and — critically — puts utilisation in the 70% range
+# instead of the 9% you get when twelve practitioners share 250 appointments a
+# month. A dashboard showing 9% utilisation looks broken, not informative.
+SAMPLE_PAGES = 150            # 150 x 200 = ~30,000 appointments
+SAMPLE_DAYS_BACK = 430        # ~14 months, so year-on-year comparison works
+SAMPLE_DAYS_FORWARD = 30      # future bookings, which must show as 'booked'
+SAMPLE_PATIENTS = 850         # ~34 visits each across 16 months, long-tailed
+
 # COMMAND ----------
 
 
@@ -157,75 +176,128 @@ def generate_sample_page(cursor, since: datetime) -> tuple[list[dict], object]:
 
     Field names mirror the SDK: ID, patientID, appointmentDate, DNA, cancelled,
     lastModified. Deliberately messy values — five phone formats, mixed-case
-    emails, missing fields, an unmapped 'wibble' status. Clean sample data would
-    let through exactly the bugs real data catches.
+    emails, missing fields. Clean sample data would let through exactly the
+    bugs real data catches.
+
+    Realism that matters for the marts, and did not exist in the first version:
+      - appointments span 14 months, so year-on-year comparison is possible
+      - FUTURE appointments are 'booked'; past ones resolve to completed, DNA
+        or cancelled. Previously status was random regardless of date, which
+        left half of all HISTORIC appointments sitting as 'booked'
+      - duration varies and the end time agrees with it, so duration_min in
+        Silver is derived from two fields that actually match
+      - patient visit counts follow a long tail rather than a flat modulo, so
+        lifetime-value banding separates instead of putting everyone in 'Low'
+      - a January dip, because clinics genuinely are quiet over the holidays
     """
     page = 1 if cursor is None else int(cursor)
-    if page > 3:
+    if page > SAMPLE_PAGES:
         return [], None
 
-    statuses = ["completed", "Completed", "cancelled", "DNA", "no show",
-                "booked", "rescheduled", "attended", "wibble"]
     phone_formats = ["0412 345 {n:03d}", "+61 412 345 {n:03d}", "0412345{n:03d}",
                      "(04) 1234 5{n:03d}", "61412345{n:03d}"]
-    first = ["Sarah", "James", "Priya", "Wei", "Mohammed", "Emma", "Liam", "Aroha"]
-    last = ["Mitchell", "Nguyen", "Patel", "Chen", "Okafor", "Wilson", "Brown"]
+    first = ["Sarah", "James", "Priya", "Wei", "Mohammed", "Emma", "Liam", "Aroha",
+             "Daniel", "Sophie", "Raj", "Chloe", "Hannah", "Tom", "Ana", "Yusuf"]
+    last = ["Mitchell", "Nguyen", "Patel", "Chen", "Okafor", "Wilson", "Brown",
+            "Taylor", "Singh", "Kaur", "Novak", "Ferrari", "Haddad", "Lee"]
+    durations = [15, 30, 30, 30, 45, 45, 60]
 
+    # Practitioner roster. gold_build assigns fte=0.6 to every 4th practitioner
+    # by index; if the generator hands them a full caseload their utilisation
+    # exceeds 100%, which looks like a bug rather than a busy clinic. The two
+    # must agree, so the weighting is mirrored here.
+    PRACTITIONERS = list(range(10, 22))
+    PRAC_WEIGHTS = [0.6 if i % 4 == 0 else 1.0 for i in range(len(PRACTITIONERS))]
+
+    now = datetime.now(timezone.utc)
     out = []
+
     for i in range(PAGE_SIZE):
         n = (page - 1) * PAGE_SIZE + i
-        start = datetime.now(timezone.utc) - timedelta(
-            days=random.randint(0, 120), hours=random.randint(8, 17)
+
+        # Long tail: a third of appointments belong to a small, frequently
+        # seen cohort. Chronic caseloads look like this, and it is what makes
+        # lifetime value worth banding at all.
+        if random.random() < 0.35:
+            patient_no = random.randint(0, SAMPLE_PATIENTS // 8)
+        else:
+            patient_no = random.randint(0, SAMPLE_PATIENTS - 1)
+
+        offset = random.randint(-SAMPLE_DAYS_BACK, SAMPLE_DAYS_FORWARD)
+        start = (now + timedelta(days=offset)).replace(
+            hour=random.randint(8, 17), minute=random.choice([0, 15, 30, 45]),
+            second=0, microsecond=0,
         )
-        # Spread modification times rather than all being "now", so the Silver
-        # dedupe window (which orders by _source_updated_ts) has something real
-        # to resolve. With every record modified at the same instant, that path
-        # is never exercised.
-        modified = datetime.now(timezone.utc) - timedelta(minutes=random.randint(0, 2880))
-        cancelled = random.random() < 0.12
+
+        # Clinics are quiet over the Australian summer holidays. Dropping most
+        # January rows gives the trend charts a visible seasonal dip.
+        if start.month == 1 and random.random() < 0.55:
+            continue
+
+        duration = random.choice(durations)
+        is_future = start > now
+
+        if is_future:
+            # Nothing in the future has happened yet.
+            cancelled, dna, arrived = random.random() < 0.04, False, False
+        else:
+            cancelled = random.random() < 0.11
+            dna = (not cancelled) and random.random() < 0.09
+            arrived = (not cancelled) and (not dna) and random.random() < 0.94
+
+        # Modified shortly after the appointment, or shortly after booking for
+        # future ones. Spread matters: the Silver dedupe orders by this, and
+        # with every record modified at the same instant that path is never
+        # exercised.
+        modified = (now if is_future else start) + timedelta(
+            minutes=random.randint(5, 2880)
+        )
+        modified = min(modified, now)
 
         out.append({
             "ID": 100000 + n,
-            "patientID": 5000 + (n % 900),
-            "practitionerID": 10 + (n % 12),
+            "patientID": 5000 + patient_no,
+            "practitionerID": random.choices(PRACTITIONERS, weights=PRAC_WEIGHTS)[0],
             "locationID": 1 + (n % 6),
             "appointmentDate": start.date().isoformat(),
             "appointmentStartTime": start.strftime("%H:%M"),
-            "appointmentEndTime": (start + timedelta(minutes=30)).strftime("%H:%M"),
+            "appointmentEndTime": (start + timedelta(minutes=duration)).strftime("%H:%M"),
             "appointmentType": random.choice(["Initial", "Standard", "Extended"]),
-            "appointmentTypeID": 1 + (n % 4),
-            "arrived": random.choice(["0", "1"]),
-            "invoiceGenerated": random.choice(["0", "1"]),
+            "appointmentTypeID": 1 + (n % 6),
+            "arrived": "1" if arrived else "0",
+            "invoiceGenerated": "1" if arrived else "0",
             "emailReminderSent": random.choice(["0", "1"]),
-            "DNA": "1" if random.random() < 0.08 else "0",
+            "DNA": "1" if dna else "0",
             "cancelled": "1" if cancelled else "0",
             "cancellationDate": start.date().isoformat() if cancelled else None,
             "Notes": random.choice(
-                [None, None, "patient called, sick", "car broke down",
+                [None, None, None, "patient called, sick", "car broke down",
                  "double booked by mistake", "work conflict"]
             ),
-            "status_raw": random.choice(statuses),   # sample only; not a real Nookal field
-            "patient_first_name": random.choice(first),
-            "patient_last_name": random.choice(last),
+            "patient_first_name": first[patient_no % len(first)],
+            "patient_last_name": last[patient_no % len(last)],
             "patient_email": random.choice(
-                [f"user{n % 900}@example.com", f"User{n % 900}@Example.COM", None]
+                [f"user{patient_no}@example.com",
+                 f"User{patient_no}@Example.COM",
+                 None]
             ),
-            "patient_phone": random.choice(phone_formats).format(n=n % 1000),
-            "patient_dob": (date(1950, 1, 1) + timedelta(days=(n * 37) % 20000)).isoformat(),
-            "postcode": f"2{(n % 900):03d}",
+            "patient_phone": random.choice(phone_formats).format(n=patient_no % 1000),
+            "patient_dob": (date(1940, 1, 1) + timedelta(days=(patient_no * 37) % 25000)).isoformat(),
+            "postcode": f"2{(patient_no % 300):03d}",
             "lastModified": modified.strftime("%Y-%m-%d %H:%M:%S"),
-            "dateCreated": (start - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S"),
+            "dateCreated": (start - timedelta(days=random.randint(1, 30))).strftime("%Y-%m-%d %H:%M:%S"),
         })
 
     # Deliberate duplicates with a LATER lastModified, so last-writer-wins in
-    # Silver has something to resolve.
+    # Silver has something real to resolve.
     for dup in out[:5]:
         later = dict(dup)
-        later["lastModified"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        later["lastModified"] = now.strftime("%Y-%m-%d %H:%M:%S")
         later["cancelled"] = "1"
+        later["arrived"] = "0"
         out.append(later)
 
-    return out, (page + 1 if page < 3 else None)
+    return out, (page + 1 if page < SAMPLE_PAGES else None)
 
 
 def _nookal_post(path: str, payload: dict) -> dict:

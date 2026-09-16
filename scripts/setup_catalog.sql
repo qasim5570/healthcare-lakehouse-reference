@@ -2,15 +2,15 @@
 -- One-time environment setup. Run BEFORE the first bundle deploy.
 --
 -- HOW TO RUN
---   ${catalog} is a placeholder, NOT Databricks SQL syntax. Either:
---     a) find-and-replace ${catalog} with your catalog name, or
+--   avanti_dev is a placeholder, NOT Databricks SQL syntax. Either:
+--     a) find-and-replace avanti_dev with your catalog name, or
 --     b) run it from a notebook:
 --
 --          CATALOG = "avanti_dev"
 --          sql = open("/Workspace/.../setup_catalog.sql").read()
 --          for stmt in sql.split(";"):
 --              if stmt.strip() and not stmt.strip().startswith("--"):
---                  spark.sql(stmt.replace("${catalog}", CATALOG))
+--                  spark.sql(stmt.replace("avanti_dev", CATALOG))
 --
 --   Run once per environment: avanti_dev, avanti_test, avanti_prod.
 --
@@ -32,25 +32,25 @@
 -- is a GRANT BOUNDARY, which is why analysts can be given gold without ever
 -- seeing bronze — unconformed data produces confidently wrong answers.
 -- ---------------------------------------------------------------------------
-CREATE SCHEMA IF NOT EXISTS ${catalog}.landing
+CREATE SCHEMA IF NOT EXISTS avanti_dev.landing
   COMMENT 'Raw files as landed from source APIs. Volumes only, no tables.';
 
-CREATE SCHEMA IF NOT EXISTS ${catalog}.bronze
+CREATE SCHEMA IF NOT EXISTS avanti_dev.bronze
   COMMENT 'Append-only, as-landed. Never edited. The replay tape.';
 
-CREATE SCHEMA IF NOT EXISTS ${catalog}.silver
+CREATE SCHEMA IF NOT EXISTS avanti_dev.silver
   COMMENT 'Cleaned, deduplicated, conformed. Engineering only.';
 
-CREATE SCHEMA IF NOT EXISTS ${catalog}.gold
+CREATE SCHEMA IF NOT EXISTS avanti_dev.gold
   COMMENT 'Business-facing marts and metric views. The only layer analysts query.';
 
-CREATE SCHEMA IF NOT EXISTS ${catalog}.gold_secure
+CREATE SCHEMA IF NOT EXISTS avanti_dev.gold_secure
   COMMENT 'PHI-bearing views. Restricted grants, deliberately separate from gold.';
 
-CREATE SCHEMA IF NOT EXISTS ${catalog}.ops
+CREATE SCHEMA IF NOT EXISTS avanti_dev.ops
   COMMENT 'Watermarks, ingest audit, data quality results, reconciliation, checkpoints.';
 
-CREATE SCHEMA IF NOT EXISTS ${catalog}.ml
+CREATE SCHEMA IF NOT EXISTS avanti_dev.ml
   COMMENT 'Feature tables, registered models, batch inference outputs.';
 
 
@@ -61,7 +61,7 @@ CREATE SCHEMA IF NOT EXISTS ${catalog}.ml
 -- Unity Catalog resolves that path to your cloud bucket and brokers a
 -- short-lived, path-scoped credential per access. Nobody handles a storage key.
 -- ---------------------------------------------------------------------------
-CREATE VOLUME IF NOT EXISTS ${catalog}.landing.raw
+CREATE VOLUME IF NOT EXISTS avanti_dev.landing.raw
   COMMENT 'Raw API responses, exactly as returned. The replay tape. Lifecycle: 90 days hot, then archive, then delete per retention policy.';
 
 -- CRITICAL: checkpoints live in ops, NOT in landing.
@@ -71,7 +71,7 @@ CREATE VOLUME IF NOT EXISTS ${catalog}.landing.raw
 -- them — Auto Loader would forget which files it had consumed and REPROCESS
 -- THE ENTIRE LANDING VOLUME, duplicating all of Bronze. You would discover it
 -- months later as a mysterious doubling of row counts.
-CREATE VOLUME IF NOT EXISTS ${catalog}.ops.checkpoints
+CREATE VOLUME IF NOT EXISTS avanti_dev.ops.checkpoints
   COMMENT 'Auto Loader checkpoints (RocksDB file tracking + inferred schemas). Operational state. NEVER subject to a lifecycle rule.';
 
 
@@ -88,7 +88,7 @@ CREATE VOLUME IF NOT EXISTS ${catalog}.ops.checkpoints
 -- Read at the start of a run, minus an overlap window. Committed ONLY after a
 -- fully successful pull — committing on partial success creates a permanent
 -- gap that reports as a successful run.
-CREATE TABLE IF NOT EXISTS ${catalog}.ops.watermark (
+CREATE TABLE IF NOT EXISTS avanti_dev.ops.watermark (
   source              STRING  NOT NULL  COMMENT 'nookal | xero | hapana | alayacare | ghl',
   entity              STRING  NOT NULL  COMMENT 'appointments | patients | journals | ...',
   high_water_mark     TIMESTAMP         COMMENT 'Max source modification timestamp successfully extracted',
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS ${catalog}.ops.watermark (
 --
 -- This is what you show the business when asked "is this number stale?", and
 -- what catches a job that has been succeeding while pulling zero rows.
-CREATE TABLE IF NOT EXISTS ${catalog}.ops.ingest_audit (
+CREATE TABLE IF NOT EXISTS avanti_dev.ops.ingest_audit (
   source              STRING,
   entity              STRING,
   batch_id            STRING    COMMENT 'The Databricks job run id, or manual-<uuid>',
@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS ${catalog}.ops.ingest_audit (
 -- Quality gate output, appended every run. The value is in TRENDING these, not
 -- just alerting: a phone-normalisation failure rate creeping from 8% to 20%
 -- over a month is a real problem no single run would flag.
-CREATE TABLE IF NOT EXISTS ${catalog}.ops.dq_results (
+CREATE TABLE IF NOT EXISTS avanti_dev.ops.dq_results (
   check_name          STRING,
   severity            STRING    COMMENT 'fail (stops the pipeline) | warn (recorded only)',
   value               DOUBLE,
@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS ${catalog}.ops.dq_results (
 
 -- Reconciliation variances. Expectations catch MALFORMED data; reconciliation
 -- catches WRONG data, which is what destroys credibility with a finance team.
-CREATE TABLE IF NOT EXISTS ${catalog}.ops.recon_results (
+CREATE TABLE IF NOT EXISTS avanti_dev.ops.recon_results (
   check_name          STRING    COMMENT 'gl_tie_out | appointment_count | sah_three_way | ...',
   grain               STRING    COMMENT 'What the variance is measured at, e.g. account_code + period',
   grain_value         STRING,
@@ -144,16 +144,16 @@ CREATE TABLE IF NOT EXISTS ${catalog}.ops.recon_results (
 -- ---------------------------------------------------------------------------
 -- VERIFY — run these after the above and check the output.
 -- ---------------------------------------------------------------------------
--- SHOW SCHEMAS IN ${catalog};
+-- SHOW SCHEMAS IN avanti_dev;
 --   expect: landing, bronze, silver, gold, gold_secure, ops, ml
 --
--- SHOW VOLUMES IN ${catalog}.landing;    -- expect: raw
--- SHOW VOLUMES IN ${catalog}.ops;        -- expect: checkpoints
+-- SHOW VOLUMES IN avanti_dev.landing;    -- expect: raw
+-- SHOW VOLUMES IN avanti_dev.ops;        -- expect: checkpoints
 --
--- SHOW TABLES IN ${catalog}.ops;
+-- SHOW TABLES IN avanti_dev.ops;
 --   expect: watermark, ingest_audit, dq_results, recon_results
 --
--- DESCRIBE CATALOG EXTENDED ${catalog};
+-- DESCRIBE CATALOG EXTENDED avanti_dev;
 --   confirm the storage location is YOUR abfss:// path, not a
 --   Databricks-managed default
 
@@ -171,29 +171,29 @@ CREATE TABLE IF NOT EXISTS ${catalog}.ops.recon_results (
 -- completed, since Bronze holds raw source statuses before canonical_status
 -- has run.
 -- ---------------------------------------------------------------------------
--- GRANT USE CATALOG ON CATALOG ${catalog} TO `avanti_analysts`;
--- GRANT USE SCHEMA, SELECT ON SCHEMA ${catalog}.gold TO `avanti_analysts`;
+-- GRANT USE CATALOG ON CATALOG avanti_dev TO `avanti_analysts`;
+-- GRANT USE SCHEMA, SELECT ON SCHEMA avanti_dev.gold TO `avanti_analysts`;
 --
--- GRANT USE CATALOG ON CATALOG ${catalog} TO `avanti_engineers`;
--- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.landing TO `avanti_engineers`;
--- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.bronze  TO `avanti_engineers`;
--- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.silver  TO `avanti_engineers`;
--- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.gold    TO `avanti_engineers`;
--- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.ops     TO `avanti_engineers`;
--- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.ml      TO `avanti_engineers`;
+-- GRANT USE CATALOG ON CATALOG avanti_dev TO `avanti_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.landing TO `avanti_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.bronze  TO `avanti_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.silver  TO `avanti_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.gold    TO `avanti_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.ops     TO `avanti_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.ml      TO `avanti_engineers`;
 --
 -- Identifiable detail lives here, with a much shorter grant list.
--- GRANT USE SCHEMA, SELECT ON SCHEMA ${catalog}.gold_secure TO `avanti_clinical_leads`;
+-- GRANT USE SCHEMA, SELECT ON SCHEMA avanti_dev.gold_secure TO `avanti_clinical_leads`;
 --
 -- SERVICE PRINCIPALS — production jobs do NOT run as a human, so every
 -- privilege the pipeline relies on must be granted explicitly. Miss these and
 -- the scheduled job fails at 05:00 with a permission error.
--- GRANT USE CATALOG ON CATALOG ${catalog} TO `sp-avanti-ingest`;
--- GRANT USE SCHEMA, WRITE VOLUME ON SCHEMA ${catalog}.landing TO `sp-avanti-ingest`;
--- GRANT USE SCHEMA, WRITE VOLUME, SELECT, MODIFY ON SCHEMA ${catalog}.ops TO `sp-avanti-ingest`;
+-- GRANT USE CATALOG ON CATALOG avanti_dev TO `sp-avanti-ingest`;
+-- GRANT USE SCHEMA, WRITE VOLUME ON SCHEMA avanti_dev.landing TO `sp-avanti-ingest`;
+-- GRANT USE SCHEMA, WRITE VOLUME, SELECT, MODIFY ON SCHEMA avanti_dev.ops TO `sp-avanti-ingest`;
 --
--- GRANT USE CATALOG ON CATALOG ${catalog} TO `sp-avanti-prod`;
--- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.bronze TO `sp-avanti-prod`;
--- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.silver TO `sp-avanti-prod`;
--- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.gold   TO `sp-avanti-prod`;
--- GRANT ALL PRIVILEGES ON SCHEMA ${catalog}.ops    TO `sp-avanti-prod`;
+-- GRANT USE CATALOG ON CATALOG avanti_dev TO `sp-avanti-prod`;
+-- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.bronze TO `sp-avanti-prod`;
+-- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.silver TO `sp-avanti-prod`;
+-- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.gold   TO `sp-avanti-prod`;
+-- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.ops    TO `sp-avanti-prod`;
