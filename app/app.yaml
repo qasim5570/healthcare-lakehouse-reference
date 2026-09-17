@@ -7,5 +7,7 @@ command: [
 env:
   - name: "DATABRICKS_WAREHOUSE_ID"
     valueFrom: "sql-warehouse"
+  - name: "GENIE_SPACE_ID"
+    valueFrom: "genie-space"
   - name: STREAMLIT_BROWSER_GATHER_USAGE_STATS
     value: "false"
