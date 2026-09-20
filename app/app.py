@@ -61,33 +61,6 @@ def run_query(query: str, token_key: str, _token: str) -> pd.DataFrame:
     """
     return sql_query_with_user_token(query, user_token=_token)
 
-
-# ---------------------------------------------------------------------------
-# Genie results
-# ---------------------------------------------------------------------------
-def genie_result_to_df(statement_response) -> pd.DataFrame:
-    """Convert a StatementResponse into a DataFrame.
-
-    Values arrive as strings, so numeric columns are converted only when EVERY
-    value parses — a partial conversion would silently produce NaN.
-    """
-    if statement_response is None or statement_response.manifest is None:
-        return pd.DataFrame()
-
-    columns = [c.name for c in statement_response.manifest.schema.columns]
-    rows = (statement_response.result.data_array
-            if statement_response.result and statement_response.result.data_array
-            else [])
-    df = pd.DataFrame(rows, columns=columns)
-
-    for col in df.columns:
-        converted = pd.to_numeric(df[col], errors="coerce")
-        if converted.notna().all():
-            df[col] = converted
-
-    return df
-
-
 # ---------------------------------------------------------------------------
 # Presentation
 #

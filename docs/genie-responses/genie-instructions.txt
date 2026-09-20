@@ -1,0 +1,56 @@
+### Table grain
+Each table has a native grain. `mart_clinic_monthly`,
+`mart_practitioner_monthly` and `mart_service_monthly` are one row per entity
+per month. `mart_patient_summary` is one row per patient, lifetime — not
+monthly.
+
+To answer "which clinic/practitioner/service is best or worst", aggregate
+across months with GROUP BY, then rank. Never rank individual entity-month
+rows: that returns one month, not an entity.
+
+### Time
+Use `month_start` for all filtering, ordering and period comparison.
+`month_label` is for display only. If no period is specified, use all
+available data.
+
+Rows with `appointments_completed = 0` are future bookings with no revenue
+recognised. Exclude them unless the question is about upcoming appointments.
+
+### Rates must be recomputed, never averaged
+When rolling up, recompute from summed numerator and denominator:
+- DNA rate = SUM(appointments_dna) / SUM(appointments_total)
+- cancellation rate = SUM(appointments_cancelled) / SUM(appointments_total)
+- utilisation = SUM(delivered_hours) / SUM(available_hours)
+- margin % = SUM(margin) / SUM(revenue)
+
+Do not use AVG() on `dna_rate`, `utilisation_pct` or `margin_pct`.
+
+### Financials
+`margin` = `revenue` - `direct_cost`. Sum the dollar columns before deriving
+any percentage or ranking.
+
+### Appointment metrics
+`appointments_total` is all scheduled; `appointments_completed` attended;
+`appointments_dna` no-shows; `appointments_cancelled` cancelled.
+`unique_patients` is distinct patients within that table's grain, not an
+enterprise-wide count.
+
+### Do not join the marts to each other
+The monthly marts are separate summaries at different grains; joining them on
+`month_start` duplicates metrics. Use each independently.
+`mart_patient_summary` is lifetime grain and must not be joined to
+
+### Comparison questions
+When asked which entity is best or worst, return the FULL ranked set, not
+just the top or bottom row. Order by the ranking metric so the answer shows
+the winner in context. Do not filter to rank = 1.
+
+### Future bookings
+Months with `appointments_completed = 0` are future bookings — no revenue has
+been recognised and margin is 0, which distorts profitability rankings.
+
+Exclude them from REVENUE, COST, MARGIN and UTILISATION questions.
+
+Do NOT exclude them from appointment-volume questions — DNA counts,
+cancellations and scheduled totals are valid in those months and dropping them
+understates the answer.
