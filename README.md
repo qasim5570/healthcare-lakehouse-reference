@@ -190,3 +190,28 @@ Named honestly so they do not get forgotten:
   grain.
 - **Silver is `overwrite`, not incremental.** Fine at this volume, wrong at
   three years of history. Move to `MERGE` or declarative CDC before Phase 2.
+
+## Deliberate omissions
+
+**Declarative Pipelines**
+**Lakeflow Connect**
+
+## A note on AI assistance
+
+This project was built with AI assistance, and the reasoning behind every
+decision is documented rather than assumed.
+
+The scaffold for the Streamlit app came from the Databricks Dashboard
+template. The pipeline, the data model, the Genie integration, and the
+evaluation were worked through with Claude — the architecture decisions,
+the debugging and the trade-offs are documented in `docs/`, including
+where the first approach was wrong and had to be revised.
+
+Notable examples: the Unity Catalog metastore surviving a workspace
+teardown and leaving unrecoverable orphaned objects; Genie ranking
+clinic-month rows instead of clinics and reporting every clinic as
+equally unprofitable; and a benchmark that surfaced a definitional
+ambiguity in "least profitable" that neither the ground truth nor the
+model had wrong — the question did.
+
+I can explain any line of this and why it is written that way.
