@@ -20,8 +20,8 @@ from pyspark.sql import Window
 from pyspark.sql import functions as F
 from pyspark.sql.types import StringType
 
-from avanti.params import param
-from avanti.transforms import (
+from lakehouse.params import param
+from lakehouse.transforms import (
     name_key,
     normalise_email,
     normalise_phone,
@@ -156,7 +156,7 @@ appointment.write.mode("overwrite").option("overwriteSchema", "true").saveAsTabl
 # only, as a foreign key.
 #
 # Left in place so the identity spine has something to work with in the
-# sandbox. Do NOT carry this into Avanti's build.
+# sandbox. Do NOT carry this into a production build.
 # ---------------------------------------------------------------------------
 (
     deduped.select(

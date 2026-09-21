@@ -17,7 +17,7 @@ Open `databricks.yml`, find the `dev` target, replace the host:
 ```yaml
   dev:
     variables:
-      catalog: avanti_dev                             # already set for you
+      catalog: clinic_dev                             # already set for you
     workspace:
       host: https://CHANGE-ME.azuredatabricks.net     # <-- YOUR WORKSPACE URL
 ```
@@ -30,11 +30,11 @@ can accidentally deploy to a placeholder.
 
 ## Prerequisites (already done if you followed the setup)
 
-- Catalog `avanti_dev` exists, bound to your own ADLS container
+- Catalog `clinic_dev` exists, bound to your own ADLS container
 - Schemas: `landing`, `bronze`, `silver`, `gold`, `ops`
-- Volume `avanti_dev.landing.raw`
+- Volume `clinic_dev.landing.raw`
 
-If not, run `scripts/setup_catalog.sql` first, replacing `avanti_dev`.
+If not, run `scripts/setup_catalog.sql` first, replacing `clinic_dev`.
 
 ## Four commands
 
@@ -66,8 +66,8 @@ to dev do not collide.
 After `run`, in a SQL editor:
 
 ```sql
-SELECT status, count(*) FROM avanti_dev.silver.fct_appointment GROUP BY status;
-SELECT * FROM avanti_dev.ops.dq_results ORDER BY run_ts DESC;
+SELECT status, count(*) FROM clinic_dev.silver.fct_appointment GROUP BY status;
+SELECT * FROM clinic_dev.ops.dq_results ORDER BY run_ts DESC;
 ```
 
 `unknown_status_rate` will be non-zero. That is correct — the sample generator
@@ -78,8 +78,8 @@ deliberately emits an unmapped `wibble` status so you can see the check fire.
 **Job fails asking for compute.** `resources/jobs.yml` assumes serverless job
 compute. Trial tier may not provide it. Fix is a `job_cluster` block — ask.
 
-**`ModuleNotFoundError: avanti`.** The job files add the parent directory to
-`sys.path` to import `avanti.transforms`. That depends on the working directory
+**`ModuleNotFoundError: client`.** The job files add the parent directory to
+`sys.path` to import `client.transforms`. That depends on the working directory
 Databricks gives a notebook task. Ask and we will correct the path.
 
 **Volume not found.** `scripts/setup_catalog.sql` has not been run, or was run
@@ -92,7 +92,7 @@ against a different catalog.
 3. `src/jobs/ingest_nookal.py` — the only plain Python; writes files
 4. `src/jobs/bronze_load.py` — Auto Loader; files become a table
 5. `src/jobs/silver_build.py` — Spark; table to table
-6. `src/avanti/transforms.py` — pure logic, no Spark, unit tested
+6. `src/lakehouse/transforms.py` — pure logic, no Spark, unit tested
 7. `tests/unit/test_transforms.py` — 39 tests, under a second, no cluster
 
 The split at 6 and 7 is the important one: the functions under test are the

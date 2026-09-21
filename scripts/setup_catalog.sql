@@ -2,22 +2,22 @@
 -- One-time environment setup. Run BEFORE the first bundle deploy.
 --
 -- HOW TO RUN
---   avanti_dev is a placeholder, NOT Databricks SQL syntax. Either:
---     a) find-and-replace avanti_dev with your catalog name, or
+--   clinic_dev is a placeholder, NOT Databricks SQL syntax. Either:
+--     a) find-and-replace clinic_dev with your catalog name, or
 --     b) run it from a notebook:
 --
---          CATALOG = "avanti_dev"
+--          CATALOG = "clinic_dev"
 --          sql = open("/Workspace/.../setup_catalog.sql").read()
 --          for stmt in sql.split(";"):
 --              if stmt.strip() and not stmt.strip().startswith("--"):
---                  spark.sql(stmt.replace("avanti_dev", CATALOG))
+--                  spark.sql(stmt.replace("clinic_dev", CATALOG))
 --
---   Run once per environment: avanti_dev, avanti_test, avanti_prod.
+--   Run once per environment: clinic_dev, clinic_test, clinic_prod.
 --
 -- PREREQUISITE
 --   The catalog itself must exist first, bound to YOUR storage:
 --
---     CREATE CATALOG IF NOT EXISTS avanti_dev
+--     CREATE CATALOG IF NOT EXISTS clinic_dev
 --     MANAGED LOCATION 'abfss://lakehouse@<account>.dfs.core.windows.net/';
 --
 --   Without MANAGED LOCATION the catalog silently falls back to the
@@ -32,25 +32,25 @@
 -- is a GRANT BOUNDARY, which is why analysts can be given gold without ever
 -- seeing bronze — unconformed data produces confidently wrong answers.
 -- ---------------------------------------------------------------------------
-CREATE SCHEMA IF NOT EXISTS avanti_dev.landing
+CREATE SCHEMA IF NOT EXISTS clinic_dev.landing
   COMMENT 'Raw files as landed from source APIs. Volumes only, no tables.';
 
-CREATE SCHEMA IF NOT EXISTS avanti_dev.bronze
+CREATE SCHEMA IF NOT EXISTS clinic_dev.bronze
   COMMENT 'Append-only, as-landed. Never edited. The replay tape.';
 
-CREATE SCHEMA IF NOT EXISTS avanti_dev.silver
+CREATE SCHEMA IF NOT EXISTS clinic_dev.silver
   COMMENT 'Cleaned, deduplicated, conformed. Engineering only.';
 
-CREATE SCHEMA IF NOT EXISTS avanti_dev.gold
+CREATE SCHEMA IF NOT EXISTS clinic_dev.gold
   COMMENT 'Business-facing marts and metric views. The only layer analysts query.';
 
-CREATE SCHEMA IF NOT EXISTS avanti_dev.gold_secure
+CREATE SCHEMA IF NOT EXISTS clinic_dev.gold_secure
   COMMENT 'PHI-bearing views. Restricted grants, deliberately separate from gold.';
 
-CREATE SCHEMA IF NOT EXISTS avanti_dev.ops
+CREATE SCHEMA IF NOT EXISTS clinic_dev.ops
   COMMENT 'Watermarks, ingest audit, data quality results, reconciliation, checkpoints.';
 
-CREATE SCHEMA IF NOT EXISTS avanti_dev.ml
+CREATE SCHEMA IF NOT EXISTS clinic_dev.ml
   COMMENT 'Feature tables, registered models, batch inference outputs.';
 
 
@@ -61,7 +61,7 @@ CREATE SCHEMA IF NOT EXISTS avanti_dev.ml
 -- Unity Catalog resolves that path to your cloud bucket and brokers a
 -- short-lived, path-scoped credential per access. Nobody handles a storage key.
 -- ---------------------------------------------------------------------------
-CREATE VOLUME IF NOT EXISTS avanti_dev.landing.raw
+CREATE VOLUME IF NOT EXISTS clinic_dev.landing.raw
   COMMENT 'Raw API responses, exactly as returned. The replay tape. Lifecycle: 90 days hot, then archive, then delete per retention policy.';
 
 -- CRITICAL: checkpoints live in ops, NOT in landing.
@@ -71,7 +71,7 @@ CREATE VOLUME IF NOT EXISTS avanti_dev.landing.raw
 -- them — Auto Loader would forget which files it had consumed and REPROCESS
 -- THE ENTIRE LANDING VOLUME, duplicating all of Bronze. You would discover it
 -- months later as a mysterious doubling of row counts.
-CREATE VOLUME IF NOT EXISTS avanti_dev.ops.checkpoints
+CREATE VOLUME IF NOT EXISTS clinic_dev.ops.checkpoints
   COMMENT 'Auto Loader checkpoints (RocksDB file tracking + inferred schemas). Operational state. NEVER subject to a lifecycle rule.';
 
 
@@ -88,7 +88,7 @@ CREATE VOLUME IF NOT EXISTS avanti_dev.ops.checkpoints
 -- Read at the start of a run, minus an overlap window. Committed ONLY after a
 -- fully successful pull — committing on partial success creates a permanent
 -- gap that reports as a successful run.
-CREATE TABLE IF NOT EXISTS avanti_dev.ops.watermark (
+CREATE TABLE IF NOT EXISTS clinic_dev.ops.watermark (
   source              STRING  NOT NULL  COMMENT 'nookal | xero | hapana | alayacare | ghl',
   entity              STRING  NOT NULL  COMMENT 'appointments | patients | journals | ...',
   high_water_mark     TIMESTAMP         COMMENT 'Max source modification timestamp successfully extracted',
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS avanti_dev.ops.watermark (
 --
 -- This is what you show the business when asked "is this number stale?", and
 -- what catches a job that has been succeeding while pulling zero rows.
-CREATE TABLE IF NOT EXISTS avanti_dev.ops.ingest_audit (
+CREATE TABLE IF NOT EXISTS clinic_dev.ops.ingest_audit (
   source              STRING,
   entity              STRING,
   batch_id            STRING    COMMENT 'The Databricks job run id, or manual-<uuid>',
@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS avanti_dev.ops.ingest_audit (
 -- Quality gate output, appended every run. The value is in TRENDING these, not
 -- just alerting: a phone-normalisation failure rate creeping from 8% to 20%
 -- over a month is a real problem no single run would flag.
-CREATE TABLE IF NOT EXISTS avanti_dev.ops.dq_results (
+CREATE TABLE IF NOT EXISTS clinic_dev.ops.dq_results (
   check_name          STRING,
   severity            STRING    COMMENT 'fail (stops the pipeline) | warn (recorded only)',
   value               DOUBLE,
@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS avanti_dev.ops.dq_results (
 
 -- Reconciliation variances. Expectations catch MALFORMED data; reconciliation
 -- catches WRONG data, which is what destroys credibility with a finance team.
-CREATE TABLE IF NOT EXISTS avanti_dev.ops.recon_results (
+CREATE TABLE IF NOT EXISTS clinic_dev.ops.recon_results (
   check_name          STRING    COMMENT 'gl_tie_out | appointment_count | sah_three_way | ...',
   grain               STRING    COMMENT 'What the variance is measured at, e.g. account_code + period',
   grain_value         STRING,
@@ -144,23 +144,23 @@ CREATE TABLE IF NOT EXISTS avanti_dev.ops.recon_results (
 -- ---------------------------------------------------------------------------
 -- VERIFY — run these after the above and check the output.
 -- ---------------------------------------------------------------------------
--- SHOW SCHEMAS IN avanti_dev;
+-- SHOW SCHEMAS IN clinic_dev;
 --   expect: landing, bronze, silver, gold, gold_secure, ops, ml
 --
--- SHOW VOLUMES IN avanti_dev.landing;    -- expect: raw
--- SHOW VOLUMES IN avanti_dev.ops;        -- expect: checkpoints
+-- SHOW VOLUMES IN clinic_dev.landing;    -- expect: raw
+-- SHOW VOLUMES IN clinic_dev.ops;        -- expect: checkpoints
 --
--- SHOW TABLES IN avanti_dev.ops;
+-- SHOW TABLES IN clinic_dev.ops;
 --   expect: watermark, ingest_audit, dq_results, recon_results
 --
--- DESCRIBE CATALOG EXTENDED avanti_dev;
+-- DESCRIBE CATALOG EXTENDED clinic_dev;
 --   confirm the storage location is YOUR abfss:// path, not a
 --   Databricks-managed default
 
 
 -- ---------------------------------------------------------------------------
 -- GRANTS — commented out for a personal sandbox where you own everything.
--- Uncomment for Avanti once the groups exist.
+-- Uncomment for the client once the groups exist.
 --
 -- Grant at SCHEMA level, to GROUPS, never to individuals and never
 -- table-by-table. That is what keeps the model reviewable and the quarterly
@@ -171,29 +171,29 @@ CREATE TABLE IF NOT EXISTS avanti_dev.ops.recon_results (
 -- completed, since Bronze holds raw source statuses before canonical_status
 -- has run.
 -- ---------------------------------------------------------------------------
--- GRANT USE CATALOG ON CATALOG avanti_dev TO `avanti_analysts`;
--- GRANT USE SCHEMA, SELECT ON SCHEMA avanti_dev.gold TO `avanti_analysts`;
+-- GRANT USE CATALOG ON CATALOG clinic_dev TO `clinic_analysts`;
+-- GRANT USE SCHEMA, SELECT ON SCHEMA clinic_dev.gold TO `clinic_analysts`;
 --
--- GRANT USE CATALOG ON CATALOG avanti_dev TO `avanti_engineers`;
--- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.landing TO `avanti_engineers`;
--- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.bronze  TO `avanti_engineers`;
--- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.silver  TO `avanti_engineers`;
--- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.gold    TO `avanti_engineers`;
--- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.ops     TO `avanti_engineers`;
--- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.ml      TO `avanti_engineers`;
+-- GRANT USE CATALOG ON CATALOG clinic_dev TO `clinic_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA clinic_dev.landing TO `clinic_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA clinic_dev.bronze  TO `clinic_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA clinic_dev.silver  TO `clinic_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA clinic_dev.gold    TO `clinic_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA clinic_dev.ops     TO `clinic_engineers`;
+-- GRANT ALL PRIVILEGES ON SCHEMA clinic_dev.ml      TO `clinic_engineers`;
 --
 -- Identifiable detail lives here, with a much shorter grant list.
--- GRANT USE SCHEMA, SELECT ON SCHEMA avanti_dev.gold_secure TO `avanti_clinical_leads`;
+-- GRANT USE SCHEMA, SELECT ON SCHEMA clinic_dev.gold_secure TO `clinic_clinical_leads`;
 --
 -- SERVICE PRINCIPALS — production jobs do NOT run as a human, so every
 -- privilege the pipeline relies on must be granted explicitly. Miss these and
 -- the scheduled job fails at 05:00 with a permission error.
--- GRANT USE CATALOG ON CATALOG avanti_dev TO `sp-avanti-ingest`;
--- GRANT USE SCHEMA, WRITE VOLUME ON SCHEMA avanti_dev.landing TO `sp-avanti-ingest`;
--- GRANT USE SCHEMA, WRITE VOLUME, SELECT, MODIFY ON SCHEMA avanti_dev.ops TO `sp-avanti-ingest`;
+-- GRANT USE CATALOG ON CATALOG clinic_dev TO `sp-clinic-ingest`;
+-- GRANT USE SCHEMA, WRITE VOLUME ON SCHEMA clinic_dev.landing TO `sp-clinic-ingest`;
+-- GRANT USE SCHEMA, WRITE VOLUME, SELECT, MODIFY ON SCHEMA clinic_dev.ops TO `sp-clinic-ingest`;
 --
--- GRANT USE CATALOG ON CATALOG avanti_dev TO `sp-avanti-prod`;
--- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.bronze TO `sp-avanti-prod`;
--- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.silver TO `sp-avanti-prod`;
--- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.gold   TO `sp-avanti-prod`;
--- GRANT ALL PRIVILEGES ON SCHEMA avanti_dev.ops    TO `sp-avanti-prod`;
+-- GRANT USE CATALOG ON CATALOG clinic_dev TO `sp-clinic-prod`;
+-- GRANT ALL PRIVILEGES ON SCHEMA clinic_dev.bronze TO `sp-clinic-prod`;
+-- GRANT ALL PRIVILEGES ON SCHEMA clinic_dev.silver TO `sp-clinic-prod`;
+-- GRANT ALL PRIVILEGES ON SCHEMA clinic_dev.gold   TO `sp-clinic-prod`;
+-- GRANT ALL PRIVILEGES ON SCHEMA clinic_dev.ops    TO `sp-clinic-prod`;

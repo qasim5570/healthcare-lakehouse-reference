@@ -1,4 +1,4 @@
-# Avanti Command Centre
+# Healthcare Lakehouse Reference
 
 Medallion lakehouse on Databricks. Sources land as raw files, Bronze keeps them
 immutable, Silver conforms them, Gold serves the business.
@@ -14,7 +14,7 @@ sources. Get this running, then clone the pattern.
 ```
 databricks.yml              bundle root: targets, variables
 resources/jobs.yml          job + schedule definitions
-src/avanti/transforms.py    pure logic (no Spark) - the unit-tested core
+src/lakehouse/transforms.py    pure logic (no Spark) - the unit-tested core
 src/jobs/ingest_nookal.py   extract -> landing volume  (plain Python)
 src/jobs/bronze_load.py     landing -> bronze          (Auto Loader)
 src/jobs/silver_build.py    bronze -> silver           (PySpark)
@@ -24,7 +24,7 @@ scripts/setup_catalog.sql   one-time schema + volume creation
 .github/workflows/ci.yml    test on PR, deploy on merge
 ```
 
-The split that matters: **`src/avanti/` is Spark-free and unit-tested;
+The split that matters: **`src/lakehouse/` is Spark-free and unit-tested;
 `src/jobs/` is where Spark runs.** The jobs import the pure functions rather
 than reimplementing them, so the logic under test is the logic in production.
 
@@ -52,7 +52,7 @@ SELECT current_catalog();
 
 ### 3. Create the schemas and volume
 
-Open `scripts/setup_catalog.sql` in a SQL editor, replace `avanti_dev` with
+Open `scripts/setup_catalog.sql` in a SQL editor, replace `clinic_dev` with
 your catalog name, and run it. This is one-time.
 
 ### 4. Validate and deploy
@@ -109,8 +109,8 @@ When Nookal credentials arrive:
 
 1. Create a secret scope and store the key:
    ```bash
-   databricks secrets create-scope avanti
-   databricks secrets put-secret avanti nookal_api_key
+   databricks secrets create-scope clinic
+   databricks secrets put-secret clinic nookal_api_key
    ```
 2. Implement `fetch_api_page()` in `src/jobs/ingest_nookal.py`. The docstring
    lists the four non-negotiables (watermark discipline, overlap window,
@@ -127,16 +127,16 @@ once you have three.
 
 ---
 
-## Promoting to Avanti
+## Promoting to production
 
 When their workspace exists:
 
 1. Fill in `targets.prod.workspace.host`.
-2. Create the service principal `sp-avanti-prod` and grant it on the catalog.
-3. Create `avanti_dev` / `avanti_test` / `avanti_prod` catalogs and run
+2. Create the service principal `sp-clinic-prod` and grant it on the catalog.
+3. Create `clinic_dev` / `clinic_test` / `clinic_prod` catalogs and run
    `setup_catalog.sql` against each.
 4. Add repo secrets in GitHub: `DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`,
-   `DATABRICKS_CLIENT_SECRET` (from `sp-avanti-cicd`).
+   `DATABRICKS_CLIENT_SECRET` (from `sp-clinic-cicd`).
 5. `databricks bundle deploy -t prod`.
 
 `mode: production` refuses to deploy unless `run_as` is a service principal,

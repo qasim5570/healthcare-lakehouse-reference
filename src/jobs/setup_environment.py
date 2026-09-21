@@ -17,7 +17,7 @@
 #
 # PREREQUISITE — the catalog itself must exist first, bound to your storage:
 #
-#     CREATE CATALOG IF NOT EXISTS avanti_dev
+#     CREATE CATALOG IF NOT EXISTS clinic_dev
 #     MANAGED LOCATION 'abfss://<container>@<account>.dfs.core.windows.net/';
 #
 #   That one statement stays manual: it names the storage path, it is
@@ -28,7 +28,7 @@
 import re
 import traceback
 
-from avanti.params import param
+from lakehouse.params import param
 
 CATALOG = param("catalog")
 SQL_PATH = param("sql_path")        # workspace path to setup_catalog.sql

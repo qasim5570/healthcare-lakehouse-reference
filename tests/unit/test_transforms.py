@@ -10,7 +10,7 @@ Run with:  pytest tests/unit -v
 
 import pytest
 
-from avanti.transforms import (
+from lakehouse.transforms import (
     canonical_status,
     match_confidence,
     name_key,

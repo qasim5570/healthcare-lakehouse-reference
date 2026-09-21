@@ -1,7 +1,7 @@
 [project]
-name = "avanti-command-centre"
+name = "healthcare-lakehouse-reference"
 version = "0.1.0"
-description = "Avanti Health data platform on Databricks"
+description = "a six-clinic healthcare provider data platform on Databricks"
 requires-python = ">=3.10"
 dependencies = []
 
@@ -10,7 +10,7 @@ dev = ["pytest>=8.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["avanti*"]
+include = ["lakehouse*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

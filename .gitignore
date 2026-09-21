@@ -10,3 +10,4 @@ venv/
 .env
 *.pem
 .DS_Store
+*.log

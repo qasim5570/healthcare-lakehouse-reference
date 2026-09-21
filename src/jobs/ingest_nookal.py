@@ -36,9 +36,9 @@ from zoneinfo import ZoneInfo
 
 from databricks.sdk.runtime import dbutils
 
-from avanti.ops import audit_finish, audit_start, commit_watermark, read_watermark
-from avanti.params import param
-from avanti.transforms import landing_path
+from lakehouse.ops import audit_finish, audit_start, commit_watermark, read_watermark
+from lakehouse.params import param
+from lakehouse.transforms import landing_path
 
 CATALOG = param("catalog")
 SCHEMA = param("landing_schema")
@@ -310,7 +310,7 @@ def _nookal_post(path: str, payload: dict) -> dict:
     """
     import requests
 
-    api_key = dbutils.secrets.get(scope="avanti", key="nookal_api_key")
+    api_key = dbutils.secrets.get(scope="clinic", key="nookal_api_key")
     body = {**payload, "api_key": api_key}          # Requests.php prepareConfig()
 
     for attempt in range(RETRY_ATTEMPTS):

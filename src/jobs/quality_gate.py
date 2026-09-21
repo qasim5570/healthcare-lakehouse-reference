@@ -18,7 +18,7 @@
 
 from pyspark.sql import functions as F
 
-from avanti.params import param
+from lakehouse.params import param
 
 CATALOG = param("catalog")
 SILVER = param("silver_schema")
