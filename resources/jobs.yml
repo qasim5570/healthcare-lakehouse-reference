@@ -10,7 +10,7 @@ resources:
     #    PREREQUISITE, and deliberately manual — the catalog must exist first,
     #    bound to your own storage:
     #
-    #      CREATE CATALOG IF NOT EXISTS avanti_dev
+    #      CREATE CATALOG IF NOT EXISTS clinic_dev
     #      MANAGED LOCATION 'abfss://<container>@<account>.dfs.core.windows.net/';
     #
     #    That statement names the storage path, is genuinely once per

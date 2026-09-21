@@ -1,5 +1,5 @@
 bundle:
-  name: avanti-command-centre
+  name: healthcare-lakehouse-reference
 
 include:
   - resources/*.yml
@@ -34,20 +34,20 @@ targets:
     mode: development
     default: true
     variables:
-      catalog: avanti_dev
+      catalog: clinic_dev
     workspace:
-      host: https://adb-7405606708936184.4.azuredatabricks.net/
+      host: https://<workspace-host>/
 
-  # Avanti production. Filled in once their workspace exists.
+  # Production. Filled in once their workspace exists.
   prod:
     mode: production
     variables:
-      catalog: avanti_prod
+      catalog: clinic_prod
     workspace:
       host: https://CHANGE-ME-PROD.azuredatabricks.net
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
     run_as:
-      service_principal_name: sp-avanti-prod
+      service_principal_name: sp-clinic-prod
     permissions:
       - level: CAN_MANAGE
-        group_name: avanti_engineers
+        group_name: clinic_engineers

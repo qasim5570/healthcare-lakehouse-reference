@@ -1,4 +1,4 @@
-"""Avanti Command Centre — clinic analytics over the Gold lakehouse.
+"""Healthcare Lakehouse Reference — clinic analytics over the Gold lakehouse.
 
 A fixed dashboard plus a natural-language question box backed by Databricks
 Genie. Queries run against a SQL warehouse as the VIEWING USER, so Unity
@@ -283,7 +283,7 @@ DNA_BY_CLINIC = """
            sum(appointments_dna)    AS dna_count,
            sum(appointments_total)  AS appointments_total,
            sum(revenue_lost_to_dna) AS revenue_lost
-    FROM   avanti_dev.gold.mart_clinic_monthly
+    FROM   clinic_dev.gold.mart_clinic_monthly
     GROUP  BY clinic_name
     ORDER  BY dna_count DESC
 """
