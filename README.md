@@ -193,8 +193,8 @@ Named honestly so they do not get forgotten:
 
 ## Deliberate omissions
 
-**Declarative Pipelines**
-**Lakeflow Connect**
+- **Declarative Pipelines**
+- **Lakeflow Connect**
 
 ## A note on AI assistance
 
